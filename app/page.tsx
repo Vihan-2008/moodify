@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle, AlertCircle, Copy } from 'lucide-react'
+import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle, AlertCircle, Copy, RefreshCw, ExternalLink } from 'lucide-react'
 import { UserPreferences } from "@/components/user-preferences"
 import { spotifyApi } from "@/lib/spotify"
 
@@ -196,6 +196,17 @@ export default function MoodifyApp() {
     navigator.clipboard.writeText(text)
   }
 
+  const clearAuthState = () => {
+    // Clear any existing auth state
+    setAccessToken(null)
+    setSpotifyUser(null)
+    setConfigError(null)
+    localStorage.removeItem('spotify_auth_state')
+    
+    // Clear URL parameters
+    window.history.replaceState({}, document.title, window.location.pathname)
+  }
+
   // Spotify OAuth
   const loginToSpotify = () => {
     if (configError) {
@@ -203,13 +214,26 @@ export default function MoodifyApp() {
       return
     }
 
+    // Clear any existing state first
+    clearAuthState()
+
     const redirectUri = getCurrentRedirectUri()
+    const state = Math.random().toString(36).substring(2, 15)
+    localStorage.setItem('spotify_auth_state', state)
+    
     const params = new URLSearchParams({
       client_id: process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID!,
       response_type: 'code',
       redirect_uri: redirectUri,
       scope: 'user-read-private user-read-email playlist-modify-public playlist-modify-private user-top-read',
+      state: state,
       show_dialog: 'true'
+    })
+    
+    console.log('Initiating Spotify OAuth with params:', {
+      client_id: process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID?.substring(0, 8) + '...',
+      redirect_uri: redirectUri,
+      state: state
     })
     
     window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`
@@ -219,6 +243,7 @@ export default function MoodifyApp() {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
     const code = urlParams.get("code")
+    const state = urlParams.get("state")
     const error = urlParams.get("error")
 
     if (error) {
@@ -227,11 +252,21 @@ export default function MoodifyApp() {
         setConfigError("Invalid Spotify Client ID. Please check your environment variables.")
       } else if (error === 'redirect_uri_mismatch') {
         setConfigError(`Redirect URI mismatch. Please add ${getCurrentRedirectUri()} to your Spotify app settings.`)
+      } else {
+        setConfigError(`Spotify authorization error: ${error}`)
       }
       return
     }
 
     if (code && !accessToken) {
+      // Verify state parameter
+      const savedState = localStorage.getItem('spotify_auth_state')
+      if (state !== savedState) {
+        console.error('State mismatch in OAuth callback')
+        setConfigError('Security error: Invalid state parameter. Please try again.')
+        return
+      }
+
       console.log('Starting token exchange with code:', code.substring(0, 10) + '...')
       
       // Exchange code for access token
@@ -250,7 +285,7 @@ export default function MoodifyApp() {
         return response.json()
       })
       .then(async (tokenData) => {
-        console.log('Token exchange response:', tokenData)
+        console.log('Token exchange response received')
         
         if (tokenData.access_token) {
           setAccessToken(tokenData.access_token)
@@ -275,7 +310,8 @@ export default function MoodifyApp() {
             console.error('Error getting user preferences:', error)
           }
           
-          // Clean URL
+          // Clean up
+          localStorage.removeItem('spotify_auth_state')
           window.history.replaceState({}, document.title, window.location.pathname)
         } else if (tokenData.error) {
           console.error('Token exchange failed:', tokenData)
@@ -284,7 +320,7 @@ export default function MoodifyApp() {
           
           // Provide specific guidance based on the error
           if (tokenData.details?.spotifyError === 'invalid_grant') {
-            errorMessage += '\n\nThis usually means:\n• The authorization code has expired (codes expire after 10 minutes)\n• The redirect URI doesn\'t match exactly\n• The code has already been used'
+            errorMessage += '\n\n🔍 This usually means:\n• The authorization code has expired (codes expire after 10 minutes)\n• The redirect URI doesn\'t match exactly\n• The code has already been used\n\n💡 Try clearing your browser cache and attempting the login again.'
           } else if (tokenData.details?.spotifyError === 'invalid_client') {
             errorMessage += '\n\nThis means your Spotify Client ID or Client Secret is incorrect.'
           }
@@ -563,7 +599,7 @@ export default function MoodifyApp() {
                     <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-1" />
                     <div className="text-left flex-1">
                       <p className="text-red-300 font-medium text-lg">Configuration Error</p>
-                      <p className="text-red-200 text-sm mt-1">{configError}</p>
+                      <p className="text-red-200 text-sm mt-1 whitespace-pre-line">{configError}</p>
                       
                       {/* Debug Information */}
                       {debugInfo && (
@@ -608,17 +644,38 @@ export default function MoodifyApp() {
                         </div>
                       )}
 
-                      {/* Setup Instructions */}
+                      {/* Quick Fix Actions */}
                       <div className="mt-4 p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
-                        <p className="text-blue-300 font-medium mb-2">Setup Instructions:</p>
-                        <ol className="text-blue-200 text-sm space-y-1 list-decimal list-inside">
-                          <li>Go to your Vercel dashboard → Project Settings → Environment Variables</li>
-                          <li>Add: <code className="bg-gray-800 px-1 rounded">NEXT_PUBLIC_SPOTIFY_CLIENT_ID</code></li>
-                          <li>Add: <code className="bg-gray-800 px-1 rounded">SPOTIFY_CLIENT_SECRET</code></li>
-                          <li>Add: <code className="bg-gray-800 px-1 rounded">NEXT_PUBLIC_SPOTIFY_REDIRECT_URI</code></li>
-                          <li>Redeploy your app after adding environment variables</li>
-                          <li>Update your Spotify app settings with the redirect URI above</li>
-                        </ol>
+                        <p className="text-blue-300 font-medium mb-3">🚀 Quick Fix Actions:</p>
+                        <div className="space-y-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full justify-start border-blue-500/50 text-blue-300 hover:bg-blue-500/10"
+                            onClick={() => window.open('https://developer.spotify.com/dashboard', '_blank')}
+                          >
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            Open Spotify Developer Dashboard
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full justify-start border-green-500/50 text-green-300 hover:bg-green-500/10"
+                            onClick={clearAuthState}
+                          >
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Clear Auth State & Try Again
+                          </Button>
+                        </div>
+                        <div className="mt-3 text-blue-200 text-sm">
+                          <p className="font-medium mb-1">✅ Checklist:</p>
+                          <ul className="text-xs space-y-1 list-disc list-inside ml-2">
+                            <li>Spotify app has redirect URI: <code className="bg-gray-800 px-1 rounded">https://moodify-project-sable.vercel.app/</code></li>
+                            <li>No old/incorrect redirect URIs in Spotify app</li>
+                            <li>Browser cache cleared</li>
+                            <li>Complete OAuth within 10 minutes</li>
+                          </ul>
+                        </div>
                       </div>
                     </div>
                   </div>
