@@ -232,6 +232,8 @@ export default function MoodifyApp() {
     }
 
     if (code && !accessToken) {
+      console.log('Starting token exchange with code:', code.substring(0, 10) + '...')
+      
       // Exchange code for access token
       fetch('/api/spotify/token', {
         method: 'POST',
@@ -243,8 +245,13 @@ export default function MoodifyApp() {
           redirect_uri: getCurrentRedirectUri()
         }),
       })
-      .then(response => response.json())
+      .then(response => {
+        console.log('Token exchange response status:', response.status)
+        return response.json()
+      })
       .then(async (tokenData) => {
+        console.log('Token exchange response:', tokenData)
+        
         if (tokenData.access_token) {
           setAccessToken(tokenData.access_token)
           const user = await spotifyApi.getUserProfile(tokenData.access_token)
@@ -271,13 +278,23 @@ export default function MoodifyApp() {
           // Clean URL
           window.history.replaceState({}, document.title, window.location.pathname)
         } else if (tokenData.error) {
-          setConfigError(`Token exchange failed: ${tokenData.error}`)
-          console.error('Token exchange error details:', tokenData)
+          console.error('Token exchange failed:', tokenData)
+          
+          let errorMessage = `Token exchange failed: ${tokenData.error}`
+          
+          // Provide specific guidance based on the error
+          if (tokenData.details?.spotifyError === 'invalid_grant') {
+            errorMessage += '\n\nThis usually means:\n• The authorization code has expired (codes expire after 10 minutes)\n• The redirect URI doesn\'t match exactly\n• The code has already been used'
+          } else if (tokenData.details?.spotifyError === 'invalid_client') {
+            errorMessage += '\n\nThis means your Spotify Client ID or Client Secret is incorrect.'
+          }
+          
+          setConfigError(errorMessage)
         }
       })
       .catch(error => {
-        console.error('Token exchange error:', error)
-        setConfigError("Failed to exchange authorization code. Please check your server configuration.")
+        console.error('Token exchange network error:', error)
+        setConfigError("Network error during token exchange. Please check your internet connection and try again.")
       })
     }
   }, [accessToken, userPreferences])

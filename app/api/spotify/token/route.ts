@@ -32,8 +32,18 @@ export async function POST(request: NextRequest) {
     console.log('Token exchange attempt:', {
       clientId: clientId.substring(0, 8) + '...',
       redirectUri,
-      codeLength: code?.length
+      codeLength: code?.length,
+      codePrefix: code?.substring(0, 10) + '...'
     })
+
+    // Validate the authorization code
+    if (!code || code.length < 10) {
+      console.error('Invalid or missing authorization code:', { codeLength: code?.length })
+      return NextResponse.json({ 
+        error: 'Invalid authorization code',
+        details: 'Authorization code is missing or too short'
+      }, { status: 400 })
+    }
 
     const tokenRequestBody = new URLSearchParams({
       grant_type: 'authorization_code',
@@ -41,7 +51,7 @@ export async function POST(request: NextRequest) {
       redirect_uri: redirectUri,
     })
 
-    console.log('Token request body:', tokenRequestBody.toString())
+    console.log('Making request to Spotify token endpoint...')
 
     const response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
@@ -54,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     const responseText = await response.text()
     console.log('Spotify response status:', response.status)
-    console.log('Spotify response:', responseText)
+    console.log('Spotify response headers:', Object.fromEntries(response.headers.entries()))
 
     if (!response.ok) {
       console.error('Spotify token exchange failed:', {
@@ -64,33 +74,63 @@ export async function POST(request: NextRequest) {
       })
       
       let errorMessage = 'Failed to exchange code for token'
+      let errorDetails = {}
+      
       try {
         const errorData = JSON.parse(responseText)
+        console.log('Parsed error data:', errorData)
+        
         if (errorData.error_description) {
           errorMessage = errorData.error_description
+        } else if (errorData.error) {
+          errorMessage = errorData.error
+        }
+        
+        errorDetails = {
+          spotifyError: errorData.error,
+          spotifyErrorDescription: errorData.error_description,
+          status: response.status,
+          redirectUri: redirectUri,
+          clientIdPrefix: clientId.substring(0, 8) + '...'
         }
       } catch (e) {
-        // Response is not JSON, use the text
+        console.error('Failed to parse error response:', e)
         errorMessage = responseText || errorMessage
+        errorDetails = {
+          status: response.status,
+          redirectUri: redirectUri,
+          rawResponse: responseText
+        }
       }
       
       return NextResponse.json({ 
         error: errorMessage,
-        details: {
-          status: response.status,
-          redirectUri: redirectUri
-        }
+        details: errorDetails
       }, { status: 500 })
     }
 
     const data = JSON.parse(responseText)
-    console.log('Token exchange successful')
+    console.log('Token exchange successful, access token length:', data.access_token?.length)
+    
+    // Remove sensitive data from logs
+    const safeData = { ...data }
+    if (safeData.access_token) {
+      safeData.access_token = safeData.access_token.substring(0, 10) + '...'
+    }
+    if (safeData.refresh_token) {
+      safeData.refresh_token = safeData.refresh_token.substring(0, 10) + '...'
+    }
+    console.log('Safe token data:', safeData)
+    
     return NextResponse.json(data)
   } catch (error) {
     console.error('Token exchange error:', error)
     return NextResponse.json({ 
       error: 'Internal server error during token exchange',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error',
+      details: {
+        errorType: error instanceof Error ? error.constructor.name : typeof error
+      }
     }, { status: 500 })
   }
 }
