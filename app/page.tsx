@@ -480,14 +480,11 @@ export default function MoodifyApp() {
           {/* Header */}
           <div className="text-center space-y-4">
             <div className="flex items-center justify-center gap-3">
-              <div className="relative">
-                <Music className="w-10 h-10 text-purple-400" />
-                <Sparkles className="w-4 h-4 text-yellow-400 absolute -top-1 -right-1 animate-pulse" />
-              </div>
-              <h1 className="text-5xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 bg-clip-text text-transparent">
-                Moodify
-              </h1>
-              <Zap className="w-8 h-8 text-yellow-400 animate-pulse" />
+              <img 
+                src="/moodify-logo.png" 
+                alt="Moodify Logo" 
+                className="h-16 w-auto"
+              />
             </div>
             <p className="text-gray-300 text-xl font-medium">AI-Powered Spotify Playlists That Match Your Energy ⚡</p>
 
