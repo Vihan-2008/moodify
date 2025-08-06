@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
   try {
-    const { code } = await request.json()
+    const { code, redirect_uri } = await request.json()
 
     // Validate environment variables
     if (!process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
@@ -11,7 +11,13 @@ export async function POST(request: NextRequest) {
 
     const clientId = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID
     const clientSecret = process.env.SPOTIFY_CLIENT_SECRET
-    const redirectUri = process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI
+    
+    // Use the redirect_uri from the request, or fall back to environment variable
+    const redirectUri = redirect_uri || process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI
+
+    if (!redirectUri) {
+      throw new Error('Missing redirect URI')
+    }
 
     const response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
@@ -22,7 +28,7 @@ export async function POST(request: NextRequest) {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: redirectUri!,
+        redirect_uri: redirectUri,
       }),
     })
 
