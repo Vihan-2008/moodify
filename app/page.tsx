@@ -4,11 +4,12 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-//import { Badge } from "@/components/ui/badge"
+import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle } from 'lucide-react'
 import { UserPreferences } from "@/components/user-preferences"
 import { spotifyApi } from "@/lib/spotify"
+import Head from 'next/head'
 
 // Mood to Spotify audio features mapping
 const moodToAudioFeatures = {
@@ -470,6 +471,11 @@ export default function MoodifyApp() {
 
   return (
     <div className="min-h-screen bg-black text-white">
+      <Head>
+        <title>Moodify - AI-Powered Spotify Playlists</title>
+        <meta name="description" content="Generate personalized Spotify playlists based on your mood with AI" />
+      </Head>
+
       {/* Animated background */}
       <div className="fixed inset-0 bg-gradient-to-br from-purple-900/20 via-black to-blue-900/20">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(120,119,198,0.1),transparent_50%)]"></div>
