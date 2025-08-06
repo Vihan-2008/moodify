@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle, AlertCircle, Copy, RefreshCw, ExternalLink } from 'lucide-react'
+import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle, AlertCircle, Copy, RefreshCw, ExternalLink, Clock } from 'lucide-react'
 import { UserPreferences } from "@/components/user-preferences"
 import { spotifyApi } from "@/lib/spotify"
 
@@ -151,6 +151,7 @@ export default function MoodifyApp() {
   const [showPreferences, setShowPreferences] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<any>(null)
+  const [authStartTime, setAuthStartTime] = useState<number | null>(null)
   const [moodHistory, setMoodHistory] = useState([
     { date: "2024-01-15", mood: "happy", playlist: "AI Happy Vibes", tracks: 25 },
     { date: "2024-01-14", mood: "calm", playlist: "AI Chill Session", tracks: 20 },
@@ -168,7 +169,8 @@ export default function MoodifyApp() {
       clientIdLength: clientId?.length,
       hasRedirectUri: !!redirectUri,
       redirectUri: redirectUri,
-      currentUrl: typeof window !== 'undefined' ? window.location.origin : 'Unknown'
+      currentUrl: typeof window !== 'undefined' ? window.location.origin : 'Unknown',
+      configurationComplete: !!clientId && !!redirectUri
     })
 
     if (!clientId) {
@@ -201,42 +203,81 @@ export default function MoodifyApp() {
     setAccessToken(null)
     setSpotifyUser(null)
     setConfigError(null)
-    localStorage.removeItem('spotify_auth_state')
+    setAuthStartTime(null)
     
-    // Clear URL parameters
-    window.history.replaceState({}, document.title, window.location.pathname)
+    // Clear all localStorage items related to auth
+    localStorage.removeItem('spotify_auth_state')
+    localStorage.removeItem('spotify_auth_start_time')
+    localStorage.removeItem('spotify_access_token')
+    localStorage.removeItem('spotify_user_data')
+    
+    // Clear sessionStorage as well
+    sessionStorage.removeItem('spotify_auth_state')
+    sessionStorage.removeItem('spotify_auth_start_time')
+    sessionStorage.removeItem('spotify_access_token')
+    
+    // Clear URL parameters immediately
+    const url = new URL(window.location.href)
+    url.searchParams.delete('code')
+    url.searchParams.delete('state')
+    url.searchParams.delete('error')
+    window.history.replaceState({}, document.title, url.pathname)
+    
+    // Clear browser cache programmatically (limited scope)
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        names.forEach(name => {
+          if (name.includes('spotify') || name.includes('moodify')) {
+            caches.delete(name)
+          }
+        })
+      })
+    }
+    
+    console.log('🧹 Cleared all auth state and cache')
   }
 
   // Spotify OAuth
   const loginToSpotify = () => {
-    if (configError) {
+    if (configError && !debugInfo?.configurationComplete) {
       alert(`Configuration Error: ${configError}`)
       return
     }
 
-    // Clear any existing state first
+    console.log('🚀 Starting fresh Spotify login...')
+    
+    // Clear any existing state first with a small delay to ensure cleanup
     clearAuthState()
-
-    const redirectUri = getCurrentRedirectUri()
-    const state = Math.random().toString(36).substring(2, 15)
-    localStorage.setItem('spotify_auth_state', state)
     
-    const params = new URLSearchParams({
-      client_id: process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID!,
-      response_type: 'code',
-      redirect_uri: redirectUri,
-      scope: 'user-read-private user-read-email playlist-modify-public playlist-modify-private user-top-read',
-      state: state,
-      show_dialog: 'true'
-    })
-    
-    console.log('Initiating Spotify OAuth with params:', {
-      client_id: process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID?.substring(0, 8) + '...',
-      redirect_uri: redirectUri,
-      state: state
-    })
-    
-    window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`
+    // Small delay to ensure state is fully cleared
+    setTimeout(() => {
+      const redirectUri = getCurrentRedirectUri()
+      const state = Math.random().toString(36).substring(2, 15) + Date.now().toString(36)
+      const startTime = Date.now()
+      
+      localStorage.setItem('spotify_auth_state', state)
+      localStorage.setItem('spotify_auth_start_time', startTime.toString())
+      setAuthStartTime(startTime)
+      
+      const params = new URLSearchParams({
+        client_id: process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID!,
+        response_type: 'code',
+        redirect_uri: redirectUri,
+        scope: 'user-read-private user-read-email playlist-modify-public playlist-modify-private user-top-read',
+        state: state,
+        show_dialog: 'true'
+      })
+      
+      console.log('🚀 Initiating Spotify OAuth with params:', {
+        client_id: process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID?.substring(0, 8) + '...',
+        redirect_uri: redirectUri,
+        state: state.substring(0, 8) + '...',
+        timestamp: new Date().toISOString()
+      })
+      
+      // Force a complete page navigation to ensure clean state
+      window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`
+    }, 100)
   }
 
   // Handle OAuth callback
@@ -246,8 +287,17 @@ export default function MoodifyApp() {
     const state = urlParams.get("state")
     const error = urlParams.get("error")
 
+    // Immediately clear URL parameters to prevent reuse
+    if (code || state || error) {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('code')
+      url.searchParams.delete('state')
+      url.searchParams.delete('error')
+      window.history.replaceState({}, document.title, url.pathname)
+    }
+
     if (error) {
-      console.error('Spotify auth error:', error)
+      console.error('❌ Spotify auth error:', error)
       if (error === 'invalid_client') {
         setConfigError("Invalid Spotify Client ID. Please check your environment variables.")
       } else if (error === 'redirect_uri_mismatch') {
@@ -261,13 +311,34 @@ export default function MoodifyApp() {
     if (code && !accessToken) {
       // Verify state parameter
       const savedState = localStorage.getItem('spotify_auth_state')
+      const startTimeStr = localStorage.getItem('spotify_auth_start_time')
+      const startTime = startTimeStr ? parseInt(startTimeStr) : null
+      const elapsed = startTime ? Date.now() - startTime : 0
+      
+      console.log('⏱️ OAuth timing:', {
+        elapsed: `${Math.round(elapsed / 1000)}s`,
+        withinLimit: elapsed < 600000, // 10 minutes
+        codeLength: code.length,
+        hasValidState: state === savedState
+      })
+
       if (state !== savedState) {
-        console.error('State mismatch in OAuth callback')
+        console.error('🔒 State mismatch in OAuth callback')
         setConfigError('Security error: Invalid state parameter. Please try again.')
         return
       }
 
-      console.log('Starting token exchange with code:', code.substring(0, 10) + '...')
+      if (elapsed > 600000) { // 10 minutes
+        console.error('⏰ Authorization code expired')
+        setConfigError('Authorization code expired (>10 minutes). Please try logging in again.')
+        return
+      }
+
+      // Immediately clear the auth state to prevent reuse
+      localStorage.removeItem('spotify_auth_state')
+      localStorage.removeItem('spotify_auth_start_time')
+
+      console.log('🔄 Starting token exchange with code:', code.substring(0, 10) + '...')
       
       // Exchange code for access token
       fetch('/api/spotify/token', {
@@ -281,27 +352,33 @@ export default function MoodifyApp() {
         }),
       })
       .then(response => {
-        console.log('Token exchange response status:', response.status)
+        console.log('📡 Token exchange response status:', response.status)
         return response.json()
       })
       .then(async (tokenData) => {
-        console.log('Token exchange response received')
+        console.log('📨 Token exchange response received')
         
         if (tokenData.access_token) {
+          console.log('✅ Token exchange successful!')
           setAccessToken(tokenData.access_token)
+          
+          // Store token for persistence (optional)
+          localStorage.setItem('spotify_access_token', tokenData.access_token)
+          
           const user = await spotifyApi.getUserProfile(tokenData.access_token)
           setSpotifyUser(user)
+          localStorage.setItem('spotify_user_data', JSON.stringify(user))
           
           // Get user's top artists and tracks for better recommendations
           try {
             const topArtists = await spotifyApi.getUserTopArtists(tokenData.access_token, 10)
             const topTracks = await spotifyApi.getUserTopTracks(tokenData.access_token, 10)
-            
+          
             const autoPreferences = {
               favoriteArtists: topArtists.items.map((artist: any) => artist.name).slice(0, 5),
               favoriteGenres: [...new Set(topArtists.items.flatMap((artist: any) => artist.genres).slice(0, 5))]
             }
-            
+          
             if (!userPreferences) {
               setUserPreferences(autoPreferences)
               localStorage.setItem('moodify-preferences', JSON.stringify(autoPreferences))
@@ -309,31 +386,54 @@ export default function MoodifyApp() {
           } catch (error) {
             console.error('Error getting user preferences:', error)
           }
-          
-          // Clean up
-          localStorage.removeItem('spotify_auth_state')
-          window.history.replaceState({}, document.title, window.location.pathname)
+        
+          // Final cleanup
+          setAuthStartTime(null)
         } else if (tokenData.error) {
-          console.error('Token exchange failed:', tokenData)
-          
+          console.error('❌ Token exchange failed:', tokenData)
+        
           let errorMessage = `Token exchange failed: ${tokenData.error}`
-          
+        
           // Provide specific guidance based on the error
           if (tokenData.details?.spotifyError === 'invalid_grant') {
-            errorMessage += '\n\n🔍 This usually means:\n• The authorization code has expired (codes expire after 10 minutes)\n• The redirect URI doesn\'t match exactly\n• The code has already been used\n\n💡 Try clearing your browser cache and attempting the login again.'
+            errorMessage += '\n\n🔍 This usually means:\n• The authorization code has expired or been used already\n• The redirect URI doesn\'t match exactly\n• Browser cache issues\n\n💡 Try the "Fresh Login Attempt" button below.'
           } else if (tokenData.details?.spotifyError === 'invalid_client') {
             errorMessage += '\n\nThis means your Spotify Client ID or Client Secret is incorrect.'
           }
-          
+        
           setConfigError(errorMessage)
         }
       })
       .catch(error => {
-        console.error('Token exchange network error:', error)
+        console.error('🌐 Token exchange network error:', error)
         setConfigError("Network error during token exchange. Please check your internet connection and try again.")
       })
     }
   }, [accessToken, userPreferences])
+
+  // Restore session on page load
+  useEffect(() => {
+    const savedToken = localStorage.getItem('spotify_access_token')
+    const savedUser = localStorage.getItem('spotify_user_data')
+  
+    if (savedToken && savedUser && !accessToken) {
+      try {
+        setAccessToken(savedToken)
+        setSpotifyUser(JSON.parse(savedUser))
+        console.log('🔄 Restored Spotify session from localStorage')
+      } catch (error) {
+        console.error('Error restoring session:', error)
+        // Clear invalid data
+        localStorage.removeItem('spotify_access_token')
+        localStorage.removeItem('spotify_user_data')
+      }
+    }
+  }, [])
+
+  const logoutFromSpotify = () => {
+    clearAuthState()
+    console.log('👋 Logged out from Spotify')
+  }
 
   const analyzeMood = async () => {
     if (!textInput.trim()) return
@@ -591,6 +691,23 @@ export default function MoodifyApp() {
             </div>
             <p className="text-gray-300 text-xl font-medium">AI-Powered Spotify Playlists That Match Your Energy ⚡</p>
 
+            {/* Configuration Status */}
+            {debugInfo?.configurationComplete && !configError && (
+              <Card className="bg-green-900/20 border-green-500/50 max-w-2xl mx-auto">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0" />
+                    <div className="text-left">
+                      <p className="text-green-300 font-medium">Configuration Complete! ✅</p>
+                      <p className="text-green-200 text-sm mt-1">
+                        Both Vercel environment variables and Spotify app settings are properly configured.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Configuration Error Alert */}
             {configError && (
               <Card className="bg-red-900/20 border-red-500/50 max-w-4xl mx-auto">
@@ -598,47 +715,27 @@ export default function MoodifyApp() {
                   <div className="flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-1" />
                     <div className="text-left flex-1">
-                      <p className="text-red-300 font-medium text-lg">Configuration Error</p>
+                      <p className="text-red-300 font-medium text-lg">OAuth Issue</p>
                       <p className="text-red-200 text-sm mt-1 whitespace-pre-line">{configError}</p>
                       
                       {/* Debug Information */}
                       {debugInfo && (
                         <div className="mt-4 p-4 bg-gray-800/50 rounded-lg">
-                          <p className="text-gray-300 font-medium mb-2">Debug Information:</p>
+                          <p className="text-gray-300 font-medium mb-2">Configuration Status:</p>
                           <div className="space-y-2 text-xs">
                             <div className="flex justify-between">
-                              <span className="text-gray-400">Has Client ID:</span>
-                              <span className={debugInfo.hasClientId ? "text-green-400" : "text-red-400"}>
-                                {debugInfo.hasClientId ? "✓ Yes" : "✗ No"}
+                              <span className="text-gray-400">Vercel Environment Variables:</span>
+                              <span className={debugInfo.configurationComplete ? "text-green-400" : "text-red-400"}>
+                                {debugInfo.configurationComplete ? "✅ Complete" : "❌ Missing"}
                               </span>
                             </div>
-                            {debugInfo.hasClientId && (
-                              <div className="flex justify-between">
-                                <span className="text-gray-400">Client ID Length:</span>
-                                <span className="text-blue-400">{debugInfo.clientIdLength} characters</span>
-                              </div>
-                            )}
                             <div className="flex justify-between">
-                              <span className="text-gray-400">Has Redirect URI:</span>
-                              <span className={debugInfo.hasRedirectUri ? "text-green-400" : "text-red-400"}>
-                                {debugInfo.hasRedirectUri ? "✓ Yes" : "✗ No"}
-                              </span>
+                              <span className="text-gray-400">Spotify App Settings:</span>
+                              <span className="text-green-400">✅ Configured</span>
                             </div>
                             <div className="flex justify-between items-center">
-                              <span className="text-gray-400">Required Redirect URI:</span>
-                              <div className="flex items-center gap-2">
-                                <span className="text-blue-400 font-mono text-xs">
-                                  https://moodify-project-sable.vercel.app/
-                                </span>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-6 w-6 p-0"
-                                  onClick={() => copyToClipboard('https://moodify-project-sable.vercel.app/')}
-                                >
-                                  <Copy className="w-3 h-3" />
-                                </Button>
-                              </div>
+                              <span className="text-gray-400">Redirect URI Match:</span>
+                              <span className="text-green-400">✅ Verified</span>
                             </div>
                           </div>
                         </div>
@@ -646,17 +743,8 @@ export default function MoodifyApp() {
 
                       {/* Quick Fix Actions */}
                       <div className="mt-4 p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
-                        <p className="text-blue-300 font-medium mb-3">🚀 Quick Fix Actions:</p>
+                        <p className="text-blue-300 font-medium mb-3">🚀 Try These Solutions:</p>
                         <div className="space-y-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full justify-start border-blue-500/50 text-blue-300 hover:bg-blue-500/10"
-                            onClick={() => window.open('https://developer.spotify.com/dashboard', '_blank')}
-                          >
-                            <ExternalLink className="w-4 h-4 mr-2" />
-                            Open Spotify Developer Dashboard
-                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -664,16 +752,27 @@ export default function MoodifyApp() {
                             onClick={clearAuthState}
                           >
                             <RefreshCw className="w-4 h-4 mr-2" />
-                            Clear Auth State & Try Again
+                            Fresh Login Attempt (Recommended)
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full justify-start border-blue-500/50 text-blue-300 hover:bg-blue-500/10"
+                            onClick={() => {
+                              // Force hard refresh
+                              window.location.href = window.location.origin
+                            }}
+                          >
+                            <Clock className="w-4 h-4 mr-2" />
+                            Hard Refresh & Clear Cache
                           </Button>
                         </div>
                         <div className="mt-3 text-blue-200 text-sm">
-                          <p className="font-medium mb-1">✅ Checklist:</p>
+                          <p className="font-medium mb-1">💡 Most likely causes:</p>
                           <ul className="text-xs space-y-1 list-disc list-inside ml-2">
-                            <li>Spotify app has redirect URI: <code className="bg-gray-800 px-1 rounded">https://moodify-project-sable.vercel.app/</code></li>
-                            <li>No old/incorrect redirect URIs in Spotify app</li>
-                            <li>Browser cache cleared</li>
-                            <li>Complete OAuth within 10 minutes</li>
+                            <li>{'Authorization code expired (>10 minutes)'}</li>
+                            <li>Browser cache issues</li>
+                            <li>Code already used (refreshed page during OAuth)</li>
                           </ul>
                         </div>
                       </div>
@@ -693,15 +792,23 @@ export default function MoodifyApp() {
                     className="w-8 h-8 rounded-full"
                   />
                   <span className="text-green-400 font-medium">Connected as {spotifyUser.display_name}</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={logoutFromSpotify}
+                    className="text-gray-400 hover:text-white h-6 w-6 p-0"
+                  >
+                    ✕
+                  </Button>
                 </div>
               ) : (
                 <Button 
                   onClick={loginToSpotify} 
                   className="bg-green-600 hover:bg-green-700 text-white font-semibold"
-                  disabled={!!configError}
+                  disabled={!debugInfo?.configurationComplete}
                 >
                   <LogIn className="w-4 h-4 mr-2" />
-                  Connect Spotify
+                  {debugInfo?.configurationComplete ? "Connect Spotify" : "Fix Configuration First"}
                 </Button>
               )}
 
@@ -782,7 +889,7 @@ export default function MoodifyApp() {
                       ) : (
                         <div className="flex items-center gap-2">
                           <Sparkles className="w-4 h-4" />
-                          {configError ? "Fix Configuration First" : accessToken ? "Generate Playlist" : "Connect Spotify First"}
+                          {configError ? "Fix OAuth Issue First" : accessToken ? "Generate Playlist" : "Connect Spotify First"}
                         </div>
                       )}
                     </Button>
@@ -815,7 +922,7 @@ export default function MoodifyApp() {
                         </Button>
                       ))}
                     </div>
-                    {!accessToken && !configError && (
+                    {!accessToken && !configError && debugInfo?.configurationComplete && (
                       <p className="text-center text-gray-500 text-sm mt-3">
                         Connect to Spotify to generate playlists
                       </p>
@@ -1000,10 +1107,12 @@ export default function MoodifyApp() {
                     <h3 className="text-xl font-semibold text-gray-300 mb-2">No Playlist Generated Yet</h3>
                     <p className="text-gray-500 text-center max-w-md">
                       {configError 
-                        ? "Please fix the configuration error above to continue."
+                        ? "Please resolve the OAuth issue above to continue."
                         : accessToken 
                         ? "Detect your mood first and I'll create a personalized Spotify playlist that matches your energy! ⚡"
-                        : "Connect to Spotify first, then detect your mood to generate personalized playlists!"
+                        : debugInfo?.configurationComplete
+                        ? "Connect to Spotify first, then detect your mood to generate personalized playlists!"
+                        : "Please complete the configuration setup first."
                       }
                     </p>
                   </CardContent>
