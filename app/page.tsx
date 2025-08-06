@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle, AlertCircle } from 'lucide-react'
+import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle, AlertCircle, Copy } from 'lucide-react'
 import { UserPreferences } from "@/components/user-preferences"
 import { spotifyApi } from "@/lib/spotify"
 
@@ -150,6 +150,7 @@ export default function MoodifyApp() {
   const [userPreferences, setUserPreferences] = useState<any>(null)
   const [showPreferences, setShowPreferences] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
+  const [debugInfo, setDebugInfo] = useState<any>(null)
   const [moodHistory, setMoodHistory] = useState([
     { date: "2024-01-15", mood: "happy", playlist: "AI Happy Vibes", tracks: 25 },
     { date: "2024-01-14", mood: "calm", playlist: "AI Chill Session", tracks: 20 },
@@ -159,9 +160,20 @@ export default function MoodifyApp() {
 
   // Check configuration on mount
   useEffect(() => {
-    if (!process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID) {
+    const clientId = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID
+    const redirectUri = process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI
+    
+    setDebugInfo({
+      hasClientId: !!clientId,
+      clientIdLength: clientId?.length,
+      hasRedirectUri: !!redirectUri,
+      redirectUri: redirectUri,
+      currentUrl: typeof window !== 'undefined' ? window.location.origin : 'Unknown'
+    })
+
+    if (!clientId) {
       setConfigError("Missing NEXT_PUBLIC_SPOTIFY_CLIENT_ID environment variable")
-    } else if (!process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI) {
+    } else if (!redirectUri) {
       setConfigError("Missing NEXT_PUBLIC_SPOTIFY_REDIRECT_URI environment variable")
     }
   }, [])
@@ -178,6 +190,10 @@ export default function MoodifyApp() {
   const getCurrentRedirectUri = () => {
     // Use your specific Vercel deployment URL
     return 'https://moodify-project-sable.vercel.app/'
+  }
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
   }
 
   // Spotify OAuth
@@ -256,6 +272,7 @@ export default function MoodifyApp() {
           window.history.replaceState({}, document.title, window.location.pathname)
         } else if (tokenData.error) {
           setConfigError(`Token exchange failed: ${tokenData.error}`)
+          console.error('Token exchange error details:', tokenData)
         }
       })
       .catch(error => {
@@ -523,16 +540,69 @@ export default function MoodifyApp() {
 
             {/* Configuration Error Alert */}
             {configError && (
-              <Card className="bg-red-900/20 border-red-500/50 max-w-2xl mx-auto">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-                    <div className="text-left">
-                      <p className="text-red-300 font-medium">Configuration Error</p>
+              <Card className="bg-red-900/20 border-red-500/50 max-w-4xl mx-auto">
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-1" />
+                    <div className="text-left flex-1">
+                      <p className="text-red-300 font-medium text-lg">Configuration Error</p>
                       <p className="text-red-200 text-sm mt-1">{configError}</p>
-                      <p className="text-red-200 text-xs mt-2">
-                        Required Redirect URI: https://moodify-project-sable.vercel.app/
-                      </p>
+                      
+                      {/* Debug Information */}
+                      {debugInfo && (
+                        <div className="mt-4 p-4 bg-gray-800/50 rounded-lg">
+                          <p className="text-gray-300 font-medium mb-2">Debug Information:</p>
+                          <div className="space-y-2 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Has Client ID:</span>
+                              <span className={debugInfo.hasClientId ? "text-green-400" : "text-red-400"}>
+                                {debugInfo.hasClientId ? "✓ Yes" : "✗ No"}
+                              </span>
+                            </div>
+                            {debugInfo.hasClientId && (
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Client ID Length:</span>
+                                <span className="text-blue-400">{debugInfo.clientIdLength} characters</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Has Redirect URI:</span>
+                              <span className={debugInfo.hasRedirectUri ? "text-green-400" : "text-red-400"}>
+                                {debugInfo.hasRedirectUri ? "✓ Yes" : "✗ No"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-gray-400">Required Redirect URI:</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-blue-400 font-mono text-xs">
+                                  https://moodify-project-sable.vercel.app/
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => copyToClipboard('https://moodify-project-sable.vercel.app/')}
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Setup Instructions */}
+                      <div className="mt-4 p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
+                        <p className="text-blue-300 font-medium mb-2">Setup Instructions:</p>
+                        <ol className="text-blue-200 text-sm space-y-1 list-decimal list-inside">
+                          <li>Go to your Vercel dashboard → Project Settings → Environment Variables</li>
+                          <li>Add: <code className="bg-gray-800 px-1 rounded">NEXT_PUBLIC_SPOTIFY_CLIENT_ID</code></li>
+                          <li>Add: <code className="bg-gray-800 px-1 rounded">SPOTIFY_CLIENT_SECRET</code></li>
+                          <li>Add: <code className="bg-gray-800 px-1 rounded">NEXT_PUBLIC_SPOTIFY_REDIRECT_URI</code></li>
+                          <li>Redeploy your app after adding environment variables</li>
+                          <li>Update your Spotify app settings with the redirect URI above</li>
+                        </ol>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
