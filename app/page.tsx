@@ -6,9 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle, AlertCircle } from 'lucide-react'
+import { Music, Type, Calendar, Play, Heart, Share2, Plus, Zap, Sparkles, LogIn, Settings, CheckCircle } from 'lucide-react'
 import { UserPreferences } from "@/components/user-preferences"
 import { spotifyApi } from "@/lib/spotify"
+import Head from 'next/head'
 
 // Mood to Spotify audio features mapping
 const moodToAudioFeatures = {
@@ -149,22 +150,12 @@ export default function MoodifyApp() {
   const [createdPlaylists, setCreatedPlaylists] = useState<any[]>([])
   const [userPreferences, setUserPreferences] = useState<any>(null)
   const [showPreferences, setShowPreferences] = useState(false)
-  const [configError, setConfigError] = useState<string | null>(null)
   const [moodHistory, setMoodHistory] = useState([
     { date: "2024-01-15", mood: "happy", playlist: "AI Happy Vibes", tracks: 25 },
     { date: "2024-01-14", mood: "calm", playlist: "AI Chill Session", tracks: 20 },
     { date: "2024-01-13", mood: "energetic", playlist: "AI Power Hour", tracks: 30 },
     { date: "2024-01-12", mood: "nostalgic", playlist: "AI Memory Lane", tracks: 18 },
   ])
-
-  // Check configuration on mount
-  useEffect(() => {
-    if (!process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID) {
-      setConfigError("Missing NEXT_PUBLIC_SPOTIFY_CLIENT_ID environment variable")
-    } else if (!process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI) {
-      setConfigError("Missing NEXT_PUBLIC_SPOTIFY_REDIRECT_URI environment variable")
-    }
-  }, [])
 
   // Load preferences from localStorage
   useEffect(() => {
@@ -174,26 +165,12 @@ export default function MoodifyApp() {
     }
   }, [])
 
-  // Get current URL for redirect URI
-  const getCurrentRedirectUri = () => {
-    if (typeof window !== 'undefined') {
-      return `${window.location.origin}/`
-    }
-    return process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI || 'http://localhost:3000/'
-  }
-
   // Spotify OAuth
   const loginToSpotify = () => {
-    if (configError) {
-      alert(`Configuration Error: ${configError}`)
-      return
-    }
-
-    const redirectUri = getCurrentRedirectUri()
     const params = new URLSearchParams({
       client_id: process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID!,
       response_type: 'code',
-      redirect_uri: redirectUri,
+      redirect_uri: process.env.NEXT_PUBLIC_SPOTIFY_REDIRECT_URI!,
       scope: 'user-read-private user-read-email playlist-modify-public playlist-modify-private user-top-read',
       show_dialog: 'true'
     })
@@ -209,11 +186,6 @@ export default function MoodifyApp() {
 
     if (error) {
       console.error('Spotify auth error:', error)
-      if (error === 'invalid_client') {
-        setConfigError("Invalid Spotify Client ID. Please check your environment variables.")
-      } else if (error === 'redirect_uri_mismatch') {
-        setConfigError(`Redirect URI mismatch. Please add ${getCurrentRedirectUri()} to your Spotify app settings.`)
-      }
       return
     }
 
@@ -224,10 +196,7 @@ export default function MoodifyApp() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          code,
-          redirect_uri: getCurrentRedirectUri()
-        }),
+        body: JSON.stringify({ code }),
       })
       .then(response => response.json())
       .then(async (tokenData) => {
@@ -256,13 +225,10 @@ export default function MoodifyApp() {
           
           // Clean URL
           window.history.replaceState({}, document.title, window.location.pathname)
-        } else if (tokenData.error) {
-          setConfigError(`Token exchange failed: ${tokenData.error}`)
         }
       })
       .catch(error => {
         console.error('Token exchange error:', error)
-        setConfigError("Failed to exchange authorization code. Please check your server configuration.")
       })
     }
   }, [accessToken, userPreferences])
@@ -505,6 +471,11 @@ export default function MoodifyApp() {
 
   return (
     <div className="min-h-screen bg-black text-white">
+      <Head>
+        <title>Moodify - AI-Powered Spotify Playlists</title>
+        <meta name="description" content="Generate personalized Spotify playlists based on your mood with AI" />
+      </Head>
+
       {/* Animated background */}
       <div className="fixed inset-0 bg-gradient-to-br from-purple-900/20 via-black to-blue-900/20">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(120,119,198,0.1),transparent_50%)]"></div>
@@ -523,24 +494,6 @@ export default function MoodifyApp() {
             </div>
             <p className="text-gray-300 text-xl font-medium">AI-Powered Spotify Playlists That Match Your Energy ⚡</p>
 
-            {/* Configuration Error Alert */}
-            {configError && (
-              <Card className="bg-red-900/20 border-red-500/50 max-w-2xl mx-auto">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-                    <div className="text-left">
-                      <p className="text-red-300 font-medium">Configuration Error</p>
-                      <p className="text-red-200 text-sm mt-1">{configError}</p>
-                      <p className="text-red-200 text-xs mt-2">
-                        Current URL: {typeof window !== 'undefined' ? window.location.origin : 'Unknown'}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
             {/* Spotify Login/User Info */}
             <div className="flex items-center justify-center gap-4">
               {spotifyUser ? (
@@ -553,11 +506,7 @@ export default function MoodifyApp() {
                   <span className="text-green-400 font-medium">Connected as {spotifyUser.display_name}</span>
                 </div>
               ) : (
-                <Button 
-                  onClick={loginToSpotify} 
-                  className="bg-green-600 hover:bg-green-700 text-white font-semibold"
-                  disabled={!!configError}
-                >
+                <Button onClick={loginToSpotify} className="bg-green-600 hover:bg-green-700 text-white font-semibold">
                   <LogIn className="w-4 h-4 mr-2" />
                   Connect Spotify
                 </Button>
@@ -629,7 +578,7 @@ export default function MoodifyApp() {
                     />
                     <Button
                       onClick={analyzeMood}
-                      disabled={!textInput.trim() || isAnalyzing || !accessToken || !!configError}
+                      disabled={!textInput.trim() || isAnalyzing || !accessToken}
                       className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
                     >
                       {isAnalyzing ? (
@@ -640,7 +589,7 @@ export default function MoodifyApp() {
                       ) : (
                         <div className="flex items-center gap-2">
                           <Sparkles className="w-4 h-4" />
-                          {configError ? "Fix Configuration First" : accessToken ? "Generate Playlist" : "Connect Spotify First"}
+                          {accessToken ? "Generate Playlist" : "Connect Spotify First"}
                         </div>
                       )}
                     </Button>
@@ -666,14 +615,14 @@ export default function MoodifyApp() {
                           variant="outline"
                           className={`h-20 flex flex-col gap-2 bg-gray-800 border-gray-600 text-white transition-all duration-300 ${item.color}`}
                           onClick={() => selectEmojiMood(item.mood)}
-                          disabled={isGenerating || !accessToken || !!configError}
+                          disabled={isGenerating || !accessToken}
                         >
                           <span className="text-3xl">{item.emoji}</span>
                           <span className="text-xs font-medium">{item.label}</span>
                         </Button>
                       ))}
                     </div>
-                    {!accessToken && !configError && (
+                    {!accessToken && (
                       <p className="text-center text-gray-500 text-sm mt-3">
                         Connect to Spotify to generate playlists
                       </p>
@@ -703,7 +652,7 @@ export default function MoodifyApp() {
                                 ? "bg-gradient-to-r from-purple-600 to-blue-600"
                                 : "bg-gray-800 border-gray-600 hover:border-purple-400"
                             }`}
-                            disabled={isGenerating || !accessToken || !!configError}
+                            disabled={isGenerating || !accessToken}
                           >
                             {isGenerating && selectedMood === mood.mood ? (
                               <div className="flex items-center gap-2">
@@ -774,6 +723,12 @@ export default function MoodifyApp() {
                         <Button
                           size="sm"
                           variant="outline"
+                          className="border-gray-600 hover:border-pink-400 bg-transparent"
+                        >
+                          <Heart className="w-4 h-4 mr-2" />
+                          Save
+                        </Button>
+                        <Button
                           className="border-gray-600 hover:border-pink-400 bg-transparent"
                         >
                           <Heart className="w-4 h-4 mr-2" />
@@ -857,9 +812,7 @@ export default function MoodifyApp() {
                     </div>
                     <h3 className="text-xl font-semibold text-gray-300 mb-2">No Playlist Generated Yet</h3>
                     <p className="text-gray-500 text-center max-w-md">
-                      {configError 
-                        ? "Please fix the configuration error above to continue."
-                        : accessToken 
+                      {accessToken 
                         ? "Detect your mood first and I'll create a personalized Spotify playlist that matches your energy! ⚡"
                         : "Connect to Spotify first, then detect your mood to generate personalized playlists!"
                       }
